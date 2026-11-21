@@ -1,0 +1,1386 @@
+!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <!-- Pengaturan viewport agar pas di layar HP dan mencegah zoom halaman yang tidak sengaja -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kota Geometri 3D - Belajar Bangun Ruang SMP</title>
+    
+    <!-- Memuat Tailwind CSS untuk tata letak antarmuka yang bersih dan responsif -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Memuat Google Fonts: Plus Jakarta Sans untuk keterbacaan optimal di perangkat mobile -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Memuat Library Three.js (r128) dan OrbitControls dari CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <style>
+        /* Pengaturan dasar font dan pencegahan perilaku gulir bawaan browser pada layar sentuh */
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #e0f2fe; /* Warna langit cerah sebagai cadangan */
+            touch-action: none; /* Memastikan gestur sentuhan sepenuhnya ditangani oleh kanvas 3D */
+        }
+
+        /* Kanvas 3D memenuhi seluruh layar */
+        #kanvas-3d {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Menyembunyikan scrollbar pada daftar gulir horizontal di panel bawah */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Efek kaca buram (glassmorphism) ringan yang hemat performa GPU HP */
+        .panel-kaca {
+            background: rgba(255, 255, 255, 0.94);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.08);
+        }
+
+        .kartu-atas {
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+        }
+
+        /* Animasi muncul halus untuk notifikasi toast */
+        @keyframes munculToast {
+            0% { transform: translate(-50%, -20px); opacity: 0; }
+            100% { transform: translate(-50%, 0); opacity: 1; }
+        }
+        .animasi-toast {
+            animation: munculToast 0.25s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="select-none text-slate-800">
+
+    <!-- ==================== KANVAS UTAMA 3D ==================== -->
+    <canvas id="kanvas-3d"></canvas>
+
+    <!-- ==================== OVERLAY NOTIFIKASI (PENGGANTI ALERT) ==================== -->
+    <div id="kotak-pesan" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 hidden pointer-events-none w-[90%] max-w-sm">
+        <div id="isi-pesan" class="bg-slate-900/95 text-white text-xs sm:text-sm font-medium px-4 py-3 rounded-2xl shadow-lg text-center border border-slate-700 animasi-toast">
+            Pesan informasi
+        </div>
+    </div>
+
+    <!-- ==================== BILAH ATAS (HEADER, STATISTIK & MISI) ==================== -->
+    <header class="fixed top-0 left-0 right-0 z-20 p-3 pointer-events-none flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-2 max-w-2xl mx-auto w-full">
+            
+            <!-- Judul & Ringkasan Total Kota (Klik untuk detail statistik) -->
+            <button onclick="bukaModalStatistik()" class="pointer-events-auto kartu-atas px-3.5 py-2 rounded-2xl border border-sky-100 flex items-center gap-2.5 active:scale-95 transition text-left">
+                <div class="w-9 h-9 rounded-xl bg-sky-500 text-white flex items-center justify-center font-extrabold text-base shadow-sm shrink-0">
+                    🏙️
+                </div>
+                <div>
+                    <div class="text-[11px] font-bold text-sky-600 uppercase tracking-wider leading-none">Kota Geometri</div>
+                    <div class="text-xs sm:text-sm font-extrabold text-slate-800 mt-0.5 flex items-center gap-1.5">
+                        <span id="stat-jumlah">0 Bangun</span>
+                        <span class="text-slate-300">•</span>
+                        <span id="stat-volume" class="text-emerald-600">0 cm³</span>
+                    </div>
+                </div>
+            </button>
+
+            <!-- Tombol Misi Belajar & Reset Kota -->
+            <div class="pointer-events-auto flex items-center gap-1.5">
+                <button onclick="bukaModalMisi()" id="btn-misi" class="kartu-atas px-3 py-2 rounded-2xl border border-amber-200 bg-amber-50/95 flex items-center gap-1.5 active:scale-95 transition">
+                    <span class="text-base">🎯</span>
+                    <div class="text-left">
+                        <div class="text-[10px] font-bold text-amber-700 leading-none">MISI</div>
+                        <div id="label-progres-misi" class="text-xs font-extrabold text-amber-900">1/4</div>
+                    </div>
+                </button>
+
+                <button onclick="konfirmasiHapusSemua()" title="Kosongkan Kota" class="kartu-atas w-10 h-10 rounded-2xl border border-rose-100 text-rose-600 flex items-center justify-center active:scale-95 transition font-bold text-sm">
+                    🗑️
+                </button>
+            </div>
+        </div>
+
+        <!-- Banner Misi Aktif Ringkas di Bawah Bilah Atas -->
+        <div id="banner-misi" onclick="bukaModalMisi()" class="pointer-events-auto max-w-2xl mx-auto w-full kartu-atas px-3.5 py-2 rounded-xl border border-indigo-100 flex items-center justify-between gap-2 cursor-pointer active:scale-[0.99] transition">
+            <div class="flex items-center gap-2 overflow-hidden">
+                <span id="ikon-status-misi" class="text-sm shrink-0">📌</span>
+                <p id="teks-misi-singkat" class="text-xs font-semibold text-slate-700 truncate">
+                    Misi 1: Bangun 1 Rumah dengan atap Limas Segiempat.
+                </p>
+            </div>
+            <span id="lencana-misi" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 shrink-0">
+                Aktif
+            </span>
+        </div>
+    </header>
+
+    <!-- ==================== TOMBOL BANTUAN KAMERA MENGAMBANG ==================== -->
+    <div class="fixed right-3 top-32 z-10 flex flex-col gap-2">
+        <button onclick="resetKamera()" class="kartu-atas w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-slate-700 shadow-md active:scale-90 transition" title="Pusatkan Kamera">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+        </button>
+        <button onclick="toggleBantuan()" class="kartu-atas w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-sky-600 font-extrabold text-sm shadow-md active:scale-90 transition" title="Panduan Singkat">
+            ?
+        </button>
+    </div>
+
+    <!-- ==================== PANEL KONTROL BAWAH (ERGONOMIS UNTUK JEMPOL) ==================== -->
+    <section id="panel-bawah" class="fixed bottom-0 left-0 right-0 z-20 panel-kaca rounded-t-3xl border-t border-slate-200/80 transition-all duration-300">
+        <div class="max-w-2xl mx-auto w-full px-3 pt-2.5 pb-4">
+            
+            <!-- MODE 1: PANEL BANGUN KOTA (DEFAULT) -->
+            <div id="tampilan-bangun">
+                <!-- Baris Pengalih Mode & Petunjuk Singkat -->
+                <div class="flex items-center justify-between mb-2 px-1">
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span class="text-xs font-bold text-slate-700">Ketuk lahan untuk menaruh / menumpuk</span>
+                    </div>
+                    <span id="label-bangun-aktif" class="text-xs font-extrabold text-sky-600 bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-200">
+                        Kubus
+                    </span>
+                </div>
+
+                <!-- Pilihan 7 Bangun Ruang (Gulir Horizontal Ramah Sentuhan) -->
+                <div id="daftar-bangun-ruang" class="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+                    <!-- Diisi secara dinamis oleh JavaScript -->
+                </div>
+
+                <!-- Pilihan Warna & Tema Bangunan -->
+                <div class="mt-1.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <span class="text-[11px] font-bold text-slate-500 shrink-0">Tema:</span>
+                    <div id="daftar-tema-warna" class="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                        <!-- Diisi secara dinamis oleh JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODE 2: PANEL INSPEKSI & KALKULATOR GEOMETRI (MUNCUL SAAT OBJEK DIKETUK) -->
+            <div id="tampilan-inspeksi" class="hidden">
+                <!-- Header Inspeksi -->
+                <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <div class="flex items-center gap-2">
+                        <span id="inspeksi-ikon" class="text-xl">🧊</span>
+                        <div>
+                            <div class="flex items-center gap-1.5">
+                                <h3 id="inspeksi-nama" class="text-sm font-extrabold text-slate-800">Kubus</h3>
+                                <span id="inspeksi-kategori" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Sisi Datar</span>
+                            </div>
+                            <p id="inspeksi-tema" class="text-[11px] font-medium text-slate-500">Tema: Gedung Kantor</p>
+                        </div>
+                    </div>
+                    <button onclick="tutupInspeksi()" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold active:scale-95 transition">
+                        ✕ Tutup
+                    </button>
+                </div>
+
+                <!-- Kontrol Pengubah Ukuran (Slider Interaktif) -->
+                <div id="kontrol-ukuran" class="grid grid-cols-2 gap-x-3 gap-y-1.5 my-2.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/70">
+                    <!-- Slider dimensi diisi dinamis sesuai jenis bangun ruang -->
+                </div>
+
+                <!-- Kartu Hasil Perhitungan Rumus Volume & Luas Permukaan -->
+                <div class="grid grid-cols-2 gap-2 mb-2.5">
+                    <!-- Kotak Volume -->
+                    <div class="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-2.5">
+                        <div class="text-[10px] font-bold text-emerald-700 uppercase">Volume (V)</div>
+                        <div id="hasil-volume" class="text-sm sm:text-base font-extrabold text-emerald-900 mt-0.5">8,00 cm³</div>
+                        <div id="rumus-volume" class="text-[10px] font-medium text-emerald-700 mt-1 leading-tight">V = s × s × s</div>
+                    </div>
+
+                    <!-- Kotak Luas Permukaan -->
+                    <div class="bg-indigo-50/90 border border-indigo-200 rounded-2xl p-2.5">
+                        <div class="text-[10px] font-bold text-indigo-700 uppercase">Luas Permukaan (L)</div>
+                        <div id="hasil-luas" class="text-sm sm:text-base font-extrabold text-indigo-900 mt-0.5">24,00 cm²</div>
+                        <div id="rumus-luas" class="text-[10px] font-medium text-indigo-700 mt-1 leading-tight">L = 6 × s²</div>
+                    </div>
+                </div>
+
+                <!-- Baris Ganti Warna Cepat & Tombol Hapus Bangun -->
+                <div class="flex items-center justify-between gap-2">
+                    <div id="warna-inspeksi" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+                        <!-- Tombol bulatan warna diisi oleh JS -->
+                    </div>
+                    <button onclick="hapusObjekTerpilih()" class="px-3.5 py-2 rounded-xl bg-rose-500 text-white text-xs font-bold shadow-sm active:scale-95 transition shrink-0 flex items-center gap-1">
+                        <span>🗑️</span> Hapus
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ==================== MODAL TANTANGAN / MISI BELAJAR ==================== -->
+    <div id="modal-misi" class="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center p-4">
+        <div class="bg-white w-full max-w-md rounded-3xl p-5 shadow-2xl border border-slate-100 max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div class="flex items-center gap-2">
+                    <span class="text-2xl">🎯</span>
+                    <div>
+                        <h2 class="text-base font-extrabold text-slate-800">Misi Arsitek Geometri</h2>
+                        <p class="text-xs text-slate-500">Selesaikan tantangan untuk melatih pemahamanmu!</p>
+                    </div>
+                </div>
+                <button onclick="tutupModalMisi()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold text-sm flex items-center justify-center">✕</button>
+            </div>
+
+            <div id="daftar-kartu-misi" class="overflow-y-auto py-3 space-y-2.5 flex-1">
+                <!-- Daftar misi diisi oleh JavaScript -->
+            </div>
+
+            <button onclick="tutupModalMisi()" class="mt-2 w-full py-2.5 rounded-2xl bg-sky-600 text-white font-bold text-sm active:scale-98 transition">
+                Lanjut Membangun Kota
+            </button>
+        </div>
+    </div>
+
+    <!-- ==================== MODAL RINGKASAN STATISTIK KOTA ==================== -->
+    <div id="modal-statistik" class="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center p-4">
+        <div class="bg-white w-full max-w-md rounded-3xl p-5 shadow-2xl border border-slate-100 max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div class="flex items-center gap-2">
+                    <span class="text-2xl">📊</span>
+                    <div>
+                        <h2 class="text-base font-extrabold text-slate-800">Statistik Mini Kota</h2>
+                        <p class="text-xs text-slate-500">Rekap seluruh bangun ruang di kotamu</p>
+                    </div>
+                </div>
+                <button onclick="tutupModalStatistik()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold text-sm flex items-center justify-center">✕</button>
+            </div>
+
+            <!-- Ringkasan Angka Utama -->
+            <div class="grid grid-cols-2 gap-2.5 my-3">
+                <div class="bg-sky-50 border border-sky-200 rounded-2xl p-3 text-center">
+                    <div class="text-xs font-bold text-sky-700">Total Bangun Ruang</div>
+                    <div id="modal-total-bangun" class="text-xl font-extrabold text-sky-900 mt-1">0</div>
+                </div>
+                <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-center">
+                    <div class="text-xs font-bold text-emerald-700">Total Volume Kota</div>
+                    <div id="modal-total-volume" class="text-xl font-extrabold text-emerald-900 mt-1">0 cm³</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex justify-between">
+                    <span class="text-slate-600 font-medium">Sisi Datar:</span>
+                    <span id="modal-sisi-datar" class="font-extrabold text-slate-800">0</span>
+                </div>
+                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex justify-between">
+                    <span class="text-slate-600 font-medium">Sisi Lengkung:</span>
+                    <span id="modal-sisi-lengkung" class="font-extrabold text-slate-800">0</span>
+                </div>
+            </div>
+
+            <!-- Rincian Per Jenis Bangun Ruang -->
+            <div class="text-xs font-bold text-slate-600 mb-1.5">Rincian Tiap Bangun Ruang:</div>
+            <div id="rincian-jenis-bangun" class="overflow-y-auto space-y-1.5 flex-1 pr-1 text-xs">
+                <!-- Diisi oleh JavaScript -->
+            </div>
+
+            <button onclick="tutupModalStatistik()" class="mt-3 w-full py-2.5 rounded-2xl bg-slate-800 text-white font-bold text-sm">
+                Tutup Ringkasan
+            </button>
+        </div>
+    </div>
+
+    <!-- ==================== MODAL PANDUAN PENGGUNAAN ==================== -->
+    <div id="modal-bantuan" class="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center p-4">
+        <div class="bg-white w-full max-w-md rounded-3xl p-5 shadow-2xl border border-slate-100">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h2 class="text-base font-extrabold text-slate-800">📱 Cara Bermain & Belajar</h2>
+                <button onclick="toggleBantuan()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold text-sm flex items-center justify-center">✕</button>
+            </div>
+            <ul class="space-y-2.5 my-3 text-xs sm:text-sm text-slate-600">
+                <li class="flex gap-2.5 items-start">
+                    <span class="bg-sky-100 text-sky-700 font-bold px-2 py-0.5 rounded-lg">1</span>
+                    <span><b>Taruh & Tumpuk:</b> Pilih bangun ruang di bawah, lalu ketuk petak tanah untuk meletakkan. Ketuk bagian atas bangunan untuk menumpuk atap!</span>
+                </li>
+                <li class="flex gap-2.5 items-start">
+                    <span class="bg-emerald-100 text-emerald-700 font-bold px-2 py-0.5 rounded-lg">2</span>
+                    <span><b>Hitung Rumus:</b> Ketuk bangun ruang yang sudah berdiri untuk melihat ukuran, rumus <b>Volume</b> & <b>Luas Permukaan</b>, serta mengubah ukurannya.</span>
+                </li>
+                <li class="flex gap-2.5 items-start">
+                    <span class="bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded-lg">3</span>
+                    <span><b>Gerak Kamera:</b> Geser 1 jari untuk memutar kota, cubit 2 jari untuk memperbesar/memperkecil, dan geser 2 jari untuk menggeser posisi.</span>
+                </li>
+            </ul>
+            <button onclick="toggleBantuan()" class="w-full py-2.5 rounded-2xl bg-sky-600 text-white font-bold text-sm">
+                Saya Mengerti!
+            </button>
+        </div>
+    </div>
+
+    <!-- ==================== MODAL KONFIRMASI KOSONGKAN KOTA ==================== -->
+    <div id="modal-konfirmasi" class="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center p-4">
+        <div class="bg-white w-full max-w-xs rounded-3xl p-5 shadow-2xl text-center">
+            <div class="text-3xl mb-2">⚠️</div>
+            <h3 class="text-base font-extrabold text-slate-800">Kosongkan Mini Kota?</h3>
+            <p class="text-xs text-slate-500 mt-1 mb-4">Semua bangun ruang yang sudah kamu susun akan dihapus.</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="tutupModalKonfirmasi()" class="py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">Batal</button>
+                <button onclick="hapusSemuaBangunan()" class="py-2.5 rounded-xl bg-rose-600 text-white font-bold text-xs">Ya, Hapus</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== LOGIKA UTAMA JAVASCRIPT ==================== -->
+    <script>
+        /**
+         * ============================================================================
+         * 1. DATA MASTER BANGUN RUANG, TEMA WARNA, DAN DAFTAR MISI SMP
+         * ============================================================================
+         */
+        const PHI = Math.PI;
+
+        // Definisi 7 bangun ruang utama sesuai kurikulum Matematika SMP (Sisi Datar & Sisi Lengkung)
+        const DAFTAR_BANGUN = [
+            {
+                id: 'kubus',
+                nama: 'Kubus',
+                kategori: 'Sisi Datar',
+                ikon: '🧊',
+                dimensiDefault: { s: 2 },
+                slider: [
+                    { key: 's', label: 'Sisi (s)', min: 1, max: 4, step: 0.5 }
+                ]
+            },
+            {
+                id: 'balok',
+                nama: 'Balok',
+                kategori: 'Sisi Datar',
+                ikon: '🏢',
+                dimensiDefault: { p: 2, l: 2, t: 3 },
+                slider: [
+                    { key: 'p', label: 'Panjang (p)', min: 1, max: 4, step: 0.5 },
+                    { key: 'l', label: 'Lebar (l)', min: 1, max: 4, step: 0.5 },
+                    { key: 't', label: 'Tinggi (t)', min: 1, max: 5, step: 0.5 }
+                ]
+            },
+            {
+                id: 'prisma',
+                nama: 'Prisma Segitiga',
+                kategori: 'Sisi Datar',
+                ikon: '⛺',
+                dimensiDefault: { a: 2, ts: 1.5, tp: 2 },
+                slider: [
+                    { key: 'a', label: 'Alas Δ (a)', min: 1, max: 4, step: 0.5 },
+                    { key: 'ts', label: 'Tinggi Δ (ts)', min: 1, max: 3, step: 0.5 },
+                    { key: 'tp', label: 'Panjang (t)', min: 1, max: 4, step: 0.5 }
+                ]
+            },
+            {
+                id: 'limas',
+                nama: 'Limas Segiempat',
+                kategori: 'Sisi Datar',
+                ikon: '🔺',
+                dimensiDefault: { s: 2, t: 2 },
+                slider: [
+                    { key: 's', label: 'Sisi Alas (s)', min: 1, max: 4, step: 0.5 },
+                    { key: 't', label: 'Tinggi (t)', min: 1, max: 4, step: 0.5 }
+                ]
+            },
+            {
+                id: 'tabung',
+                nama: 'Tabung',
+                kategori: 'Sisi Lengkung',
+                ikon: '🛢️',
+                dimensiDefault: { r: 1, t: 2.5 },
+                slider: [
+                    { key: 'r', label: 'Jari-jari (r)', min: 0.5, max: 2, step: 0.5 },
+                    { key: 't', label: 'Tinggi (t)', min: 1, max: 5, step: 0.5 }
+                ]
+            },
+            {
+                id: 'kerucut',
+                nama: 'Kerucut',
+                kategori: 'Sisi Lengkung',
+                ikon: '🎉',
+                dimensiDefault: { r: 1, t: 2 },
+                slider: [
+                    { key: 'r', label: 'Jari-jari (r)', min: 0.5, max: 2, step: 0.5 },
+                    { key: 't', label: 'Tinggi (t)', min: 1, max: 4, step: 0.5 }
+                ]
+            },
+            {
+                id: 'bola',
+                nama: 'Bola',
+                kategori: 'Sisi Lengkung',
+                ikon: '⚽',
+                dimensiDefault: { r: 1 },
+                slider: [
+                    { key: 'r', label: 'Jari-jari (r)', min: 0.5, max: 2, step: 0.5 }
+                ]
+            }
+        ];
+
+        // Tema warna bangunan untuk memudahkan siswa berkreasi
+        const DAFTAR_TEMA = [
+            { id: 'rumah', nama: 'Rumah', warna: '#f97316', aksen: 'bg-orange-500' },
+            { id: 'kantor', nama: 'Kantor', warna: '#0ea5e9', aksen: 'bg-sky-500' },
+            { id: 'menara', nama: 'Menara', warna: '#8b5cf6', aksen: 'bg-violet-500' },
+            { id: 'atap', nama: 'Atap Merah', warna: '#ef4444', aksen: 'bg-red-500' },
+            { id: 'taman', nama: 'Pohon/Taman', warna: '#22c55e', aksen: 'bg-emerald-500' },
+            { id: 'monumen', nama: 'Monumen Emas', warna: '#eab308', aksen: 'bg-yellow-500' }
+        ];
+
+        // Daftar Misi Edukasi untuk Siswa SMP
+        const DAFTAR_MISI = [
+            {
+                id: 1,
+                judul: 'Misi 1: Rumah Beratap Limas',
+                deskripsi: 'Bangun minimal 1 Kubus/Balok dan letakkan 1 Limas Segiempat di atasnya sebagai atap.',
+                cekSelesai: (daftarObjek) => {
+                    const adaBadan = daftarObjek.some(o => o.jenis === 'kubus' || o.jenis === 'balok');
+                    const adaLimasTumpuk = daftarObjek.some(o => o.jenis === 'limas' && o.mesh.position.y > 0.1);
+                    return adaBadan && adaLimasTumpuk;
+                }
+            },
+            {
+                id: 2,
+                judul: 'Misi 2: Taman Bangun Sisi Lengkung',
+                deskripsi: 'Tambahkan minimal 3 bangun ruang sisi lengkung (Tabung, Kerucut, atau Bola) ke dalam kota.',
+                cekSelesai: (daftarObjek) => {
+                    const jumlahLengkung = daftarObjek.filter(o => ['tabung', 'kerucut', 'bola'].includes(o.jenis)).length;
+                    return jumlahLengkung >= 3;
+                }
+            },
+            {
+                id: 3,
+                judul: 'Misi 3: Menara Kembar Silinder',
+                deskripsi: 'Susun menara dengan menumpuk Kerucut di atas Tabung (seperti roket atau mercusuar).',
+                cekSelesai: (daftarObjek) => {
+                    const adaTabung = daftarObjek.some(o => o.jenis === 'tabung');
+                    const adaKerucutAtas = daftarObjek.some(o => o.jenis === 'kerucut' && o.mesh.position.y > 0.5);
+                    return adaTabung && adaKerucutAtas;
+                }
+            },
+            {
+                id: 4,
+                judul: 'Misi 4: Kota Padat Volume 50 cm³',
+                deskripsi: 'Kembangkan mini kotamu hingga memiliki total volume seluruh bangunan minimal 50 cm³!',
+                cekSelesai: (daftarObjek, totalVolume) => {
+                    return totalVolume >= 50;
+                }
+            }
+        ];
+
+        /**
+         * ============================================================================
+         * 2. VARIABEL GLOBAL & STATUS APLIKASI
+         * ============================================================================
+         */
+        let scene, camera, renderer, controls;
+        let raycaster, pointer;
+        let bidangTanah, gridHelper;
+        
+        // Menyimpan seluruh objek bangun ruang yang ada di scene
+        let daftarBangunanKota = []; 
+        let idCounter = 1;
+
+        // Status pilihan user saat ini
+        let jenisTerpilih = 'kubus';
+        let temaTerpilih = DAFTAR_TEMA[0];
+        let objekDiinspeksi = null; // Menyimpan objek yang sedang diklik untuk dilihat rumusnya
+        let misiAktifIndex = 0;
+
+        // Variabel bantu untuk membedakan ketukan (tap) dan geseran kamera (drag)
+        let posisiSentuhAwal = { x: 0, y: 0 };
+        let waktuSentuhAwal = 0;
+
+        /**
+         * ============================================================================
+         * 3. INISIALISASI SCENE 3D THREE.JS (RINGAN & OPTIMAL UNTUK HP)
+         * ============================================================================
+         */
+        function inisialisasi3D() {
+            const kanvas = document.getElementById('kanvas-3d');
+
+            // 1. Membuat Scene dengan latar belakang biru langit cerah
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color('#dbeafe');
+            scene.fog = new THREE.Fog('#dbeafe', 25, 65);
+
+            // 2. Mengatur Kamera Perspektif
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(11, 11, 13);
+            camera.lookAt(0, 0, 0);
+
+            // 3. Mengatur Renderer dengan batasan pixelRatio agar ringan di GPU HP
+            renderer = new THREE.WebGLRenderer({ canvas: kanvas, antialias: true, powerPreference: 'high-performance' });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // 4. Pencahayaan Cerah & Alami
+            const lampuAmbient = new THREE.AmbientLight(0xffffff, 0.68);
+            scene.add(lampuAmbient);
+
+            const lampuMatahari = new THREE.DirectionalLight(0xffffff, 0.75);
+            lampuMatahari.position.set(12, 20, 10);
+            lampuMatahari.castShadow = true;
+            lampuMatahari.shadow.mapSize.width = 1024;
+            lampuMatahari.shadow.mapSize.height = 1024;
+            lampuMatahari.shadow.camera.near = 2;
+            lampuMatahari.shadow.camera.far = 45;
+            const batasBayangan = 12;
+            lampuMatahari.shadow.camera.left = -batasBayangan;
+            lampuMatahari.shadow.camera.right = batasBayangan;
+            lampuMatahari.shadow.camera.top = batasBayangan;
+            lampuMatahari.shadow.camera.bottom = -batasBayangan;
+            scene.add(lampuMatahari);
+
+            // 5. Membuat Lahan Kota (Grid 12x12 satuan)
+            buatLahanKota();
+
+            // 6. Kontrol Kamera Sentuh (Orbit, Cubit Zoom, Geser)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.08;
+            controls.maxPolarAngle = Math.PI / 2 - 0.06; // Mencegah kamera tembus ke bawah tanah
+            controls.minDistance = 5;
+            controls.maxDistance = 30;
+            controls.target.set(0, 0.5, 0);
+
+            // 7. Raycaster untuk mendeteksi ketukan jari pada grid atau bangun ruang
+            raycaster = new THREE.Raycaster();
+            pointer = new THREE.Vector2();
+
+            // 8. Event Listener Layar Sentuh & Mouse
+            kanvas.addEventListener('pointerdown', saatPointerDown);
+            kanvas.addEventListener('pointerup', saatPointerUp);
+            window.addEventListener('resize', saatLayarDiubahUkuran);
+
+            // Tambahkan contoh awal 1 rumah sederhana agar siswa langsung paham konsep menumpuk
+            buatContohKotaAwal();
+        }
+
+        /**
+         * Membuat alas tanah hijau rumput, jalan raya dekoratif, dan garis grid
+         */
+        function buatLahanKota() {
+            const ukuranGrid = 12;
+
+            // Alas rumput hijau lembut
+            const geoTanah = new THREE.BoxGeometry(ukuranGrid, 0.4, ukuranGrid);
+            const matTanah = new THREE.MeshLambertMaterial({ color: '#86efac' });
+            bidangTanah = new THREE.Mesh(geoTanah, matTanah);
+            bidangTanah.position.y = -0.2;
+            bidangTanah.receiveShadow = true;
+            bidangTanah.name = 'TANAH_KOTA';
+            scene.add(bidangTanah);
+
+            // Dekorasi jalan aspal melintang di tengah agar terlihat seperti kota sungguhan
+            const geoJalan1 = new THREE.PlaneGeometry(ukuranGrid, 1.8);
+            const matJalan = new THREE.MeshLambertMaterial({ color: '#475569' });
+            const jalan1 = new THREE.Mesh(geoJalan1, matJalan);
+            jalan1.rotation.x = -Math.PI / 2;
+            jalan1.position.set(0, 0.005, 0.5);
+            jalan1.receiveShadow = true;
+            scene.add(jalan1);
+
+            // Garis grid tipis untuk panduan penempatan
+            gridHelper = new THREE.GridHelper(ukuranGrid, ukuranGrid, 0x166534, 0x4ade80);
+            gridHelper.position.y = 0.01;
+            gridHelper.material.opacity = 0.45;
+            gridHelper.material.transparent = true;
+            scene.add(gridHelper);
+        }
+
+        /**
+         * Membuat 1 bangunan contoh saat aplikasi pertama dibuka agar siswa langsung melihat contoh tumpukan
+         */
+        function buatContohKotaAwal() {
+            tambahBangunKeKota('kubus', { s: 2 }, DAFTAR_TEMA[1], new THREE.Vector3(-2, 0, -2), false);
+            tambahBangunKeKota('prisma', { a: 2, ts: 1.5, tp: 2 }, DAFTAR_TEMA[3], new THREE.Vector3(-2, 2, -2), false);
+            perbaruiStatistikDanMisi();
+        }
+
+        /**
+         * ============================================================================
+         * 4. PEMBUATAN GEOMETRI 3D & KALKULATOR RUMUS MATEMATIKA SMP
+         * ============================================================================
+         */
+        
+        /**
+         * Menghasilkan Mesh 3D (beserta garis tepi agar bentuk bangun ruang terlihat tegas)
+         * Titik pangkal (origin) selalu berada di dasar (y = 0) untuk memudahkan penumpukan.
+         */
+        function buatMeshBangunRuang(jenis, dim, warnaHex) {
+            let geometry;
+            let tinggiObjek = 0;
+
+            switch (jenis) {
+                case 'kubus': {
+                    const s = dim.s;
+                    geometry = new THREE.BoxGeometry(s, s, s);
+                    geometry.translate(0, s / 2, 0);
+                    tinggiObjek = s;
+                    break;
+                }
+                case 'balok': {
+                    const { p, l, t } = dim;
+                    geometry = new THREE.BoxGeometry(p, t, l);
+                    geometry.translate(0, t / 2, 0);
+                    tinggiObjek = t;
+                    break;
+                }
+                case 'prisma': {
+                    // Prisma segitiga sama kaki sebagai atap rumah atau tenda
+                    const { a, ts, tp } = dim;
+                    const bentukSegitiga = new THREE.Shape();
+                    bentukSegitiga.moveTo(-a / 2, 0);
+                    bentukSegitiga.lineTo(a / 2, 0);
+                    bentukSegitiga.lineTo(0, ts);
+                    bentukSegitiga.closePath();
+
+                    const opsiExtrude = { depth: tp, bevelEnabled: false };
+                    geometry = new THREE.ExtrudeGeometry(bentukSegitiga, opsiExtrude);
+                    // Pusatkan pada sumbu Z
+                    geometry.translate(0, 0, -tp / 2);
+                    tinggiObjek = ts;
+                    break;
+                }
+                case 'limas': {
+                    // Limas segiempat beraturan (ConeGeometry dengan 4 segmen radial diputar 45 derajat)
+                    const { s, t } = dim;
+                    const radius = (s * Math.sqrt(2)) / 2;
+                    geometry = new THREE.ConeGeometry(radius, t, 4);
+                    geometry.rotateY(Math.PI / 4);
+                    geometry.translate(0, t / 2, 0);
+                    tinggiObjek = t;
+                    break;
+                }
+                case 'tabung': {
+                    const { r, t } = dim;
+                    geometry = new THREE.CylinderGeometry(r, r, t, 28);
+                    geometry.translate(0, t / 2, 0);
+                    tinggiObjek = t;
+                    break;
+                }
+                case 'kerucut': {
+                    const { r, t } = dim;
+                    geometry = new THREE.ConeGeometry(r, t, 28);
+                    geometry.translate(0, t / 2, 0);
+                    tinggiObjek = t;
+                    break;
+                }
+                case 'bola': {
+                    const { r } = dim;
+                    geometry = new THREE.SphereGeometry(r, 24, 20);
+                    geometry.translate(0, r, 0);
+                    tinggiObjek = r * 2;
+                    break;
+                }
+            }
+
+            const material = new THREE.MeshStandardMaterial({
+                color: warnaHex,
+                roughness: 0.45,
+                metalness: 0.08
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            // Menambahkan garis tepi tipis (EdgesGeometry) untuk memperjelas rusuk bangun ruang
+            const garisTepi = new THREE.EdgesGeometry(geometry, 25);
+            const matGaris = new THREE.LineBasicMaterial({ color: 0x1e293b, transparent: true, opacity: 0.35 });
+            const wireframe = new THREE.LineSegments(garisTepi, matGaris);
+            wireframe.name = 'GARIS_TEPI';
+            mesh.add(wireframe);
+
+            return { mesh, tinggiObjek };
+        }
+
+        /**
+         * Menghitung Volume, Luas Permukaan, dan menyusun teks rumus SMP secara otomatis
+         */
+        function hitungGeometri(jenis, dim) {
+            let volume = 0;
+            let luas = 0;
+            let rumusV = '';
+            let rumusL = '';
+
+            switch (jenis) {
+                case 'kubus': {
+                    const s = dim.s;
+                    volume = Math.pow(s, 3);
+                    luas = 6 * Math.pow(s, 2);
+                    rumusV = `V = s³ = ${s}³`;
+                    rumusL = `L = 6 × s² = 6 × ${s}²`;
+                    break;
+                }
+                case 'balok': {
+                    const { p, l, t } = dim;
+                    volume = p * l * t;
+                    luas = 2 * ((p * l) + (p * t) + (l * t));
+                    rumusV = `V = p × l × t = ${p}×${l}×${t}`;
+                    rumusL = `L = 2(pl + pt + lt)`;
+                    break;
+                }
+                case 'prisma': {
+                    // Prisma segitiga sama kaki: luas alas = 1/2 * a * ts, keliling alas = a + 2 * sisiMiring
+                    const { a, ts, tp } = dim;
+                    const luasAlas = 0.5 * a * ts;
+                    const sisiMiring = Math.sqrt(Math.pow(a / 2, 2) + Math.pow(ts, 2));
+                    const kelilingAlas = a + (2 * sisiMiring);
+                    volume = luasAlas * tp;
+                    luas = (2 * luasAlas) + (kelilingAlas * tp);
+                    rumusV = `V = L.Alas × t = (½×${a}×${ts}) × ${tp}`;
+                    rumusL = `L = (2 × L.Alas) + (K.Alas × t)`;
+                    break;
+                }
+                case 'limas': {
+                    // Limas segiempat beraturan
+                    const { s, t } = dim;
+                    const luasAlas = s * s;
+                    const tinggiSegitigaTegak = Math.sqrt(Math.pow(s / 2, 2) + Math.pow(t, 2));
+                    const luas4Segitiga = 4 * (0.5 * s * tinggiSegitigaTegak);
+                    volume = (1 / 3) * luasAlas * t;
+                    luas = luasAlas + luas4Segitiga;
+                    rumusV = `V = ⅓ × s² × t = ⅓ × ${s}² × ${t}`;
+                    rumusL = `L = s² + (4 × ½ × s × t.tegak)`;
+                    break;
+                }
+                case 'tabung': {
+                    const { r, t } = dim;
+                    volume = PHI * r * r * t;
+                    luas = 2 * PHI * r * (r + t);
+                    rumusV = `V = π × r² × t (r=${r}, t=${t})`;
+                    rumusL = `L = 2 × π × r × (r + t)`;
+                    break;
+                }
+                case 'kerucut': {
+                    const { r, t } = dim;
+                    const garisPelukis = Math.sqrt(r * r + t * t);
+                    volume = (1 / 3) * PHI * r * r * t;
+                    luas = PHI * r * (r + garisPelukis);
+                    rumusV = `V = ⅓ × π × r² × t (r=${r}, t=${t})`;
+                    rumusL = `L = π × r × (r + s), s=${garisPelukis.toFixed(1)}`;
+                    break;
+                }
+                case 'bola': {
+                    const { r } = dim;
+                    volume = (4 / 3) * PHI * Math.pow(r, 3);
+                    luas = 4 * PHI * Math.pow(r, 2);
+                    rumusV = `V = ⁴⁄₃ × π × r³ (r=${r})`;
+                    rumusL = `L = 4 × π × r² (r=${r})`;
+                    break;
+                }
+            }
+
+            return { volume, luas, rumusV, rumusL };
+        }
+
+        /**
+         * ============================================================================
+         * 5. INTERAKSI SENTUH (MENARUH, MENUMPUK & MEMILIH BANGUN RUANG)
+         * ============================================================================
+         */
+        function saatPointerDown(event) {
+            posisiSentuhAwal = { x: event.clientX, y: event.clientY };
+            waktuSentuhAwal = Date.now();
+        }
+
+        function saatPointerUp(event) {
+            // Hitung jarak geser jari dan durasi sentuhan agar tidak bentrok dengan rotasi kamera
+            const jarakGeser = Math.hypot(
+                event.clientX - posisiSentuhAwal.x,
+                event.clientY - posisiSentuhAwal.y
+            );
+            const durasiSentuh = Date.now() - waktuSentuhAwal;
+
+            // Jika jari bergeser kurang dari 10px dan waktu singkat (< 350ms), anggap sebagai KETUKAN (TAP)
+            if (jarakGeser < 10 && durasiSentuh < 350) {
+                prosesKetukanLayar(event.clientX, event.clientY);
+            }
+        }
+
+        function prosesKetukanLayar(clientX, clientY) {
+            // Konversi koordinat layar ke koordinat normalisasi Three.js (-1 sampai +1)
+            pointer.x = (clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(pointer, camera);
+
+            // Daftar target yang bisa diketuk: seluruh mesh bangunan yang ada + bidang tanah
+            const daftarMeshBangunan = daftarBangunanKota.map(item => item.mesh);
+            const targetObjek = [...daftarMeshBangunan, bidangTanah];
+
+            const hasilTabrakan = raycaster.intersectObjects(targetObjek, false);
+
+            if (hasilTabrakan.length === 0) return;
+
+            const ketukanPertama = hasilTabrakan[0];
+            const objekTerkena = ketukanPertama.object;
+
+            // KASUS A: Siswa mengetuk bidang tanah -> Taruh bangun ruang baru di petak tersebut
+            if (objekTerkena === bidangTanah) {
+                // Jika sedang dalam mode inspeksi, tutup mode inspeksi terlebih dahulu agar tidak tidak sengaja menaruh objek
+                if (objekDiinspeksi) {
+                    tutupInspeksi();
+                    return;
+                }
+
+                // Snap koordinat X dan Z ke kelipatan 1 satuan grid agar rapi
+                const xGrid = Math.round(ketukanPertama.point.x);
+                const zGrid = Math.round(ketukanPertama.point.z);
+
+                // Batasi agar tetap berada di dalam area lahan (-5 sampai 5)
+                const xAman = Math.max(-5, Math.min(5, xGrid));
+                const zAman = Math.max(-5, Math.min(5, zGrid));
+
+                const masterBangun = DAFTAR_BANGUN.find(b => b.id === jenisTerpilih);
+                tambahBangunKeKota(
+                    jenisTerpilih,
+                    { ...masterBangun.dimensiDefault },
+                    temaTerpilih,
+                    new THREE.Vector3(xAman, 0, zAman),
+                    true
+                );
+                return;
+            }
+
+            // KASUS B: Siswa mengetuk bangunan yang sudah ada
+            const dataBangunan = daftarBangunanKota.find(item => item.mesh === objekTerkena);
+            if (!dataBangunan) return;
+
+            // Cek apakah siswa mengetuk sisi ATAS bangunan (normal.y > 0.7) untuk MENUMPUK objek baru
+            const normalPermukaan = ketukanPertama.face.normal;
+            const sedangMenumpuk = normalPermukaan.y > 0.75 && !objekDiinspeksi;
+
+            // Tidak bisa menumpuk di atas ujung lancip Kerucut, Limas, atau Bola
+            const bisaDitumpuki = !['kerucut', 'limas', 'bola'].includes(dataBangunan.jenis);
+
+            if (sedangMenumpuk && bisaDitumpuki) {
+                const posisiTumpuk = new THREE.Vector3(
+                    dataBangunan.mesh.position.x,
+                    dataBangunan.mesh.position.y + dataBangunan.tinggi,
+                    dataBangunan.mesh.position.z
+                );
+
+                // Batasi tinggi tumpukan maksimal agar tetap terlihat di layar HP
+                if (posisiTumpuk.y > 10) {
+                    tampilkanPesan('Wah, menara sudah sangat tinggi! Coba bangun di sebelahnya.');
+                    return;
+                }
+
+                const masterBangun = DAFTAR_BANGUN.find(b => b.id === jenisTerpilih);
+                tambahBangunKeKota(
+                    jenisTerpilih,
+                    { ...masterBangun.dimensiDefault },
+                    temaTerpilih,
+                    posisiTumpuk,
+                    true
+                );
+            } else {
+                // Buka Kalkulator Geometri & Inspeksi untuk bangun ruang yang diketuk
+                bukaInspeksi(dataBangunan);
+            }
+        }
+
+        /**
+         * Menambahkan bangun ruang baru ke dalam scene 3D dan array kota
+         */
+        function tambahBangunKeKota(jenis, dimensi, tema, posisi, tampilkanNotif = true) {
+            const { mesh, tinggiObjek } = buatMeshBangunRuang(jenis, dimensi, tema.warna);
+            mesh.position.copy(posisi);
+            scene.add(mesh);
+
+            const master = DAFTAR_BANGUN.find(b => b.id === jenis);
+            const objekBaru = {
+                id: idCounter++,
+                jenis: jenis,
+                nama: master.nama,
+                kategori: master.kategori,
+                ikon: master.ikon,
+                dimensi: dimensi,
+                tema: { ...tema },
+                tinggi: tinggiObjek,
+                mesh: mesh
+            };
+
+            daftarBangunanKota.push(objekBaru);
+
+            // Efek animasi memantul kecil saat diletakkan
+            mesh.scale.set(0.2, 0.2, 0.2);
+            let skala = 0.2;
+            const animasiMuncul = setInterval(() => {
+                skala += 0.2;
+                if (skala >= 1) {
+                    mesh.scale.set(1, 1, 1);
+                    clearInterval(animasiMuncul);
+                } else {
+                    mesh.scale.set(skala, skala, skala);
+                }
+            }, 16);
+
+            perbaruiStatistikDanMisi();
+
+            if (tampilkanNotif) {
+                const hasil = hitungGeometri(jenis, dimensi);
+                tampilkanPesan(`${master.ikon} ${master.nama} dipasang! Volume: ${hasil.volume.toFixed(1)} cm³`);
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 6. PANEL INSPEKSI & KALKULATOR GEOMETRI INTERAKTIF
+         * ============================================================================
+         */
+        function bukaInspeksi(dataBangunan) {
+            // Kembalikan sorotan objek sebelumnya jika ada
+            if (objekDiinspeksi && objekDiinspeksi.mesh) {
+                objekDiinspeksi.mesh.material.emissive.setHex(0x000000);
+            }
+
+            objekDiinspeksi = dataBangunan;
+            // Beri efek cahaya sorotan halus pada objek yang dipilih
+            objekDiinspeksi.mesh.material.emissive.setHex(0x222222);
+
+            // Beralih tampilan panel bawah ke Mode Inspeksi
+            document.getElementById('tampilan-bangun').classList.add('hidden');
+            document.getElementById('tampilan-inspeksi').classList.remove('hidden');
+
+            // Isi informasi header inspeksi
+            document.getElementById('inspeksi-ikon').textContent = dataBangunan.ikon;
+            document.getElementById('inspeksi-nama').textContent = dataBangunan.nama;
+            document.getElementById('inspeksi-kategori').textContent = dataBangunan.kategori;
+            document.getElementById('inspeksi-tema').textContent = `Tema: ${dataBangunan.tema.nama}`;
+
+            // Render slider pengubah dimensi sesuai jenis bangun ruang
+            renderSliderInspeksi(dataBangunan);
+
+            // Render pilihan warna cepat
+            renderWarnaInspeksi(dataBangunan);
+
+            // Hitung dan tampilkan rumus Volume & Luas Permukaan
+            perbaruiTampilanRumus(dataBangunan);
+        }
+
+        function tutupInspeksi() {
+            if (objekDiinspeksi && objekDiinspeksi.mesh) {
+                objekDiinspeksi.mesh.material.emissive.setHex(0x000000);
+            }
+            objekDiinspeksi = null;
+
+            document.getElementById('tampilan-inspeksi').classList.add('hidden');
+            document.getElementById('tampilan-bangun').classList.remove('hidden');
+        }
+
+        function renderSliderInspeksi(dataBangunan) {
+            const wadahSlider = document.getElementById('kontrol-ukuran');
+            wadahSlider.innerHTML = '';
+
+            const master = DAFTAR_BANGUN.find(b => b.id === dataBangunan.jenis);
+
+            master.slider.forEach(item => {
+                const nilaiSaatIni = dataBangunan.dimensi[item.key];
+                const div = document.createElement('div');
+                div.className = 'flex flex-col';
+                div.innerHTML = `
+                    <div class="flex justify-between text-[11px] font-bold text-slate-700 mb-0.5">
+                        <span>${item.label}</span>
+                        <span id="val-${item.key}" class="text-sky-600">${nilaiSaatIni} cm</span>
+                    </div>
+                    <input type="range" min="${item.min}" max="${item.max}" step="${item.step}" value="${nilaiSaatIni}"
+                        class="w-full accent-sky-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                        oninput="ubahDimensiObjek('${item.key}', this.value)">
+                `;
+                wadahSlider.appendChild(div);
+            });
+        }
+
+        /**
+         * Memperbarui ukuran 3D bangun ruang secara real-time saat slider digeser
+         */
+        function ubahDimensiObjek(kunciDimensi, nilaiBaruStr) {
+            if (!objekDiinspeksi) return;
+
+            const nilaiBaru = parseFloat(nilaiBaruStr);
+            objekDiinspeksi.dimensi[kunciDimensi] = nilaiBaru;
+
+            // Perbarui label angka di sebelah slider
+            const labelEl = document.getElementById(`val-${kunciDimensi}`);
+            if (labelEl) labelEl.textContent = `${nilaiBaru} cm`;
+
+            // Simpan posisi lama dan ganti geometri mesh 3D
+            const posisiLama = objekDiinspeksi.mesh.position.clone();
+            scene.remove(objekDiinspeksi.mesh);
+            objekDiinspeksi.mesh.geometry.dispose();
+
+            const { mesh, tinggiObjek } = buatMeshBangunRuang(
+                objekDiinspeksi.jenis,
+                objekDiinspeksi.dimensi,
+                objekDiinspeksi.tema.warna
+            );
+            mesh.position.copy(posisiLama);
+            mesh.material.emissive.setHex(0x222222);
+            scene.add(mesh);
+
+            objekDiinspeksi.mesh = mesh;
+            objekDiinspeksi.tinggi = tinggiObjek;
+
+            // Hitung ulang rumus & statistik kota
+            perbaruiTampilanRumus(objekDiinspeksi);
+            perbaruiStatistikDanMisi();
+        }
+
+        function renderWarnaInspeksi(dataBangunan) {
+            const wadah = document.getElementById('warna-inspeksi');
+            wadah.innerHTML = '';
+
+            DAFTAR_TEMA.forEach(tema => {
+                const aktif = dataBangunan.tema.id === tema.id;
+                const btn = document.createElement('button');
+                btn.className = `w-7 h-7 rounded-full shrink-0 border-2 transition ${aktif ? 'border-slate-900 scale-110' : 'border-white shadow-xs'}`;
+                btn.style.backgroundColor = tema.warna;
+                btn.title = tema.nama;
+                btn.onclick = () => {
+                    if (!objekDiinspeksi) return;
+                    objekDiinspeksi.tema = { ...tema };
+                    objekDiinspeksi.mesh.material.color.set(tema.warna);
+                    document.getElementById('inspeksi-tema').textContent = `Tema: ${tema.nama}`;
+                    renderWarnaInspeksi(objekDiinspeksi);
+                };
+                wadah.appendChild(btn);
+            });
+        }
+
+        function perbaruiTampilanRumus(dataBangunan) {
+            const hasil = hitungGeometri(dataBangunan.jenis, dataBangunan.dimensi);
+            document.getElementById('hasil-volume').textContent = `${hasil.volume.toFixed(2)} cm³`;
+            document.getElementById('rumus-volume').textContent = hasil.rumusV;
+
+            document.getElementById('hasil-luas').textContent = `${hasil.luas.toFixed(2)} cm²`;
+            document.getElementById('rumus-luas').textContent = hasil.rumusL;
+        }
+
+        function hapusObjekTerpilih() {
+            if (!objekDiinspeksi) return;
+
+            scene.remove(objekDiinspeksi.mesh);
+            objekDiinspeksi.mesh.geometry.dispose();
+
+            daftarBangunanKota = daftarBangunanKota.filter(item => item.id !== objekDiinspeksi.id);
+            tampilkanPesan(`${objekDiinspeksi.nama} berhasil dihapus dari kota.`);
+            
+            tutupInspeksi();
+            perbaruiStatistikDanMisi();
+        }
+
+        /**
+         * ============================================================================
+         * 7. PENGELOLAAN STATISTIK KOTA & EVALUASI MISI BELAJAR
+         * ============================================================================
+         */
+        function perbaruiStatistikDanMisi() {
+            const totalBangun = daftarBangunanKota.length;
+            let totalVolume = 0;
+            let jumlahSisiDatar = 0;
+            let jumlahSisiLengkung = 0;
+
+            // Hitung rekapitulasi setiap bangun ruang di kota
+            const hitunganPerJenis = {};
+            DAFTAR_BANGUN.forEach(b => {
+                hitunganPerJenis[b.id] = { nama: b.nama, ikon: b.ikon, jumlah: 0, volume: 0 };
+            });
+
+            daftarBangunanKota.forEach(obj => {
+                const geo = hitungGeometri(obj.jenis, obj.dimensi);
+                totalVolume += geo.volume;
+
+                if (obj.kategori === 'Sisi Datar') jumlahSisiDatar++;
+                else jumlahSisiLengkung++;
+
+                if (hitunganPerJenis[obj.jenis]) {
+                    hitunganPerJenis[obj.jenis].jumlah++;
+                    hitunganPerJenis[obj.jenis].volume += geo.volume;
+                }
+            });
+
+            // Perbarui teks pada bilah atas
+            document.getElementById('stat-jumlah').textContent = `${totalBangun} Bangun`;
+            document.getElementById('stat-volume').textContent = `${totalVolume.toFixed(1)} cm³`;
+
+            // Perbarui isi Modal Statistik
+            document.getElementById('modal-total-bangun').textContent = `${totalBangun} Buah`;
+            document.getElementById('modal-total-volume').textContent = `${totalVolume.toFixed(2)} cm³`;
+            document.getElementById('modal-sisi-datar').textContent = `${jumlahSisiDatar} Bangun`;
+            document.getElementById('modal-sisi-lengkung').textContent = `${jumlahSisiLengkung} Bangun`;
+
+            const wadahRincian = document.getElementById('rincian-jenis-bangun');
+            wadahRincian.innerHTML = '';
+            Object.values(hitunganPerJenis).forEach(item => {
+                const baris = document.createElement('div');
+                baris.className = 'flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-100';
+                baris.innerHTML = `
+                    <span class="font-semibold text-slate-700">${item.ikon} ${item.nama}</span>
+                    <span class="font-bold text-slate-800">${item.jumlah}× <span class="text-emerald-600 font-semibold">(${item.volume.toFixed(1)} cm³)</span></span>
+                `;
+                wadahRincian.appendChild(baris);
+            });
+
+            // Evaluasi seluruh Misi Belajar
+            let jumlahMisiSelesai = 0;
+            let misiBelumSelesaiPertama = null;
+
+            DAFTAR_MISI.forEach((misi, idx) => {
+                const selesai = misi.cekSelesai(daftarBangunanKota, totalVolume);
+                if (selesai) {
+                    jumlahMisiSelesai++;
+                } else if (misiBelumSelesaiPertama === null) {
+                    misiBelumSelesaiPertama = { misi, idx };
+                }
+            });
+
+            // Perbarui lencana progres misi di bilah atas
+            document.getElementById('label-progres-misi').textContent = `${jumlahMisiSelesai}/${DAFTAR_MISI.length}`;
+
+            const bannerTeks = document.getElementById('teks-misi-singkat');
+            const bannerLencana = document.getElementById('lencana-misi');
+            const bannerIkon = document.getElementById('ikon-status-misi');
+
+            if (misiBelumSelesaiPertama) {
+                bannerIkon.textContent = '🎯';
+                bannerTeks.textContent = `${misiBelumSelesaiPertama.misi.judul}: ${misiBelumSelesaiPertama.misi.deskripsi}`;
+                bannerLencana.textContent = 'Aktif';
+                bannerLencana.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 shrink-0';
+            } else {
+                bannerIkon.textContent = '🏆';
+                bannerTeks.textContent = 'Hebat! Semua Misi Arsitek Geometri telah selesai!';
+                bannerLencana.textContent = 'Selesai';
+                bannerLencana.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0';
+            }
+
+            // Render ulang daftar kartu misi di dalam modal misi
+            renderDaftarKartuMisi(totalVolume);
+        }
+
+        function renderDaftarKartuMisi(totalVolume) {
+            const wadahMisi = document.getElementById('daftar-kartu-misi');
+            wadahMisi.innerHTML = '';
+
+            DAFTAR_MISI.forEach(misi => {
+                const selesai = misi.cekSelesai(daftarBangunanKota, totalVolume);
+                const kartu = document.createElement('div');
+                kartu.className = `p-3.5 rounded-2xl border transition ${
+                    selesai 
+                        ? 'bg-emerald-50/80 border-emerald-200' 
+                        : 'bg-slate-50 border-slate-200'
+                }`;
+                kartu.innerHTML = `
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <h4 class="text-xs sm:text-sm font-extrabold ${selesai ? 'text-emerald-900' : 'text-slate-800'}">
+                            ${misi.judul}
+                        </h4>
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                            selesai ? 'bg-emerald-500 text-white' : 'bg-amber-100 text-amber-800'
+                        }">
+                            ${selesai ? '✓ Selesai' : 'Belum'}
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-600 leading-relaxed">${misi.deskripsi}</p>
+                `;
+                wadahMisi.appendChild(kartu);
+            });
+        }
+
+        /**
+         * ============================================================================
+         * 8. RENDER TOMBOL UI BAWAH & KONTROL MODAL
+         * ============================================================================
+         */
+        function renderUIPanelBawah() {
+            // 1. Render tombol pilihan 7 Bangun Ruang
+            const wadahBangun = document.getElementById('daftar-bangun-ruang');
+            wadahBangun.innerHTML = '';
+
+            DAFTAR_BANGUN.forEach(bangun => {
+                const aktif = jenisTerpilih === bangun.id;
+                const tombol = document.createElement('button');
+                tombol.className = `flex flex-col items-center justify-center min-w-[74px] py-2 px-2 rounded-2xl border transition active:scale-95 shrink-0 ${
+                    aktif 
+                        ? 'bg-sky-600 text-white border-sky-600 shadow-md shadow-sky-200' 
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`;
+                tombol.innerHTML = `
+                    <span class="text-xl mb-0.5">${bangun.ikon}</span>
+                    <span class="text-[11px] font-bold leading-tight text-center">${bangun.nama.split(' ')[0]}</span>
+                    <span class="text-[9px] ${aktif ? 'text-sky-100' : 'text-slate-400'} leading-none mt-0.5">
+                        ${bangun.kategori === 'Sisi Datar' ? 'Datar' : 'Lengkung'}
+                    </span>
+                `;
+                tombol.onclick = () => {
+                    jenisTerpilih = bangun.id;
+                    document.getElementById('label-bangun-aktif').textContent = bangun.nama;
+                    renderUIPanelBawah();
+                };
+                wadahBangun.appendChild(tombol);
+            });
+
+            // 2. Render tombol pilihan Tema Warna
+            const wadahTema = document.getElementById('daftar-tema-warna');
+            wadahTema.innerHTML = '';
+
+            DAFTAR_TEMA.forEach(tema => {
+                const aktif = temaTerpilih.id === tema.id;
+                const tombol = document.createElement('button');
+                tombol.className = `flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold shrink-0 transition active:scale-95 ${
+                    aktif 
+                        ? 'bg-slate-800 text-white border-slate-800' 
+                        : 'bg-white text-slate-600 border-slate-200'
+                }`;
+                tombol.innerHTML = `
+                    <span class="w-3 h-3 rounded-full border border-white/50" style="background-color: ${tema.warna}"></span>
+                    <span>${tema.nama}</span>
+                `;
+                tombol.onclick = () => {
+                    temaTerpilih = tema;
+                    renderUIPanelBawah();
+                };
+                wadahTema.appendChild(tombol);
+            });
+        }
+
+        // Fungsi-fungsi pembuka dan penutup Modal
+        function bukaModalMisi() {
+            const modal = document.getElementById('modal-misi');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        function tutupModalMisi() {
+            const modal = document.getElementById('modal-misi');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function bukaModalStatistik() {
+            const modal = document.getElementById('modal-statistik');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        function tutupModalStatistik() {
+            const modal = document.getElementById('modal-statistik');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function toggleBantuan() {
+            const modal = document.getElementById('modal-bantuan');
+            if (modal.classList.contains('hidden')) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            } else {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        }
+
+        function konfirmasiHapusSemua() {
+            if (daftarBangunanKota.length === 0) {
+                tampilkanPesan('Mini kota sudah kosong.');
+                return;
+            }
+            const modal = document.getElementById('modal-konfirmasi');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function tutupModalKonfirmasi() {
+            const modal = document.getElementById('modal-konfirmasi');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function hapusSemuaBangunan() {
+            daftarBangunanKota.forEach(item => {
+                scene.remove(item.mesh);
+                item.mesh.geometry.dispose();
+            });
+            daftarBangunanKota = [];
+            tutupInspeksi();
+            tutupModalKonfirmasi();
+            perbaruiStatistikDanMisi();
+            tampilkanPesan('Semua bangunan berhasil dibersihkan. Silakan berkreasi!');
+        }
+
+        function resetKamera() {
+            camera.position.set(11, 11, 13);
+            controls.target.set(0, 0.5, 0);
+            controls.update();
+            tampilkanPesan('Posisi kamera dipusatkan kembali.');
+        }
+
+        // Sistem Notifikasi Toast Singkat (Pengganti alert bawaan browser)
+        let timerPesan;
+        function tampilkanPesan(teks) {
+            const kotak = document.getElementById('kotak-pesan');
+            const isi = document.getElementById('isi-pesan');
+            isi.textContent = teks;
+            kotak.classList.remove('hidden');
+
+            clearTimeout(timerPesan);
+            timerPesan = setTimeout(() => {
+                kotak.classList.add('hidden');
+            }, 2500);
+        }
+
+        /**
+         * ============================================================================
+         * 9. LOOP RENDER ANIMASI & RESPONSIVITAS LAYAR
+         * ============================================================================
+         */
+        function saatLayarDiubahUkuran() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function loopAnimasi() {
+            requestAnimationFrame(loopAnimasi);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Jalankan seluruh sistem setelah halaman selesai dimuat
+        window.onload = function () {
+            renderUIPanelBawah();
+            inisialisasi3D();
+            loopAnimasi();
+        };
+    </script>
+</body>
+</html>
